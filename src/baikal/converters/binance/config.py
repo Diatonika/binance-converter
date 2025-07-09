@@ -1,6 +1,6 @@
 from attrs import define
 
-from baikal.adapters.binance.enums import (
+from baikal.converters.binance.enums import (
     BinanceDataInterval,
     BinanceDataType,
     BinanceInstrumentType,

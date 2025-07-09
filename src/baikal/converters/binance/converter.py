@@ -4,9 +4,9 @@ import logging
 from pathlib import Path
 from zipfile import ZipFile
 
-from pandera.typing.polars import DataFrame
+from pandera.typing.polars import LazyFrame
 from polars import (
-    DataFrame as PolarDataFrame,
+    Boolean,
     Expr,
     Int16,
     Int64,
@@ -16,21 +16,21 @@ from polars import (
     concat,
     datetime_range,
     from_epoch,
-    len as length,
     lit,
-    read_csv,
+    scan_csv,
 )
 from rich.progress import Progress
 
-from baikal.adapters.binance._data_granularity import BinanceDataGranularity
-from baikal.adapters.binance._ohlcv import BinanceOHLCV
-from baikal.adapters.binance.config import BinanceDataConfig
-from baikal.adapters.binance.enums import BinanceInstrumentType
 from baikal.common.rich import RichConsoleStack, with_handler
+from baikal.common.rich.progress import TimeFraction
 from baikal.common.trade.models import OHLCV
+from baikal.converters.binance._data_granularity import BinanceDataGranularity
+from baikal.converters.binance._ohlcv import BinanceOHLCV
+from baikal.converters.binance.config import BinanceDataConfig
+from baikal.converters.binance.enums import BinanceInstrumentType
 
 
-class BinanceAdapter:
+class BinanceConverter:
     LOGGER = logging.getLogger(__name__)
 
     def __init__(self, root: Path) -> None:
@@ -50,7 +50,9 @@ class BinanceAdapter:
         config: BinanceDataConfig,
         start: datetime.datetime,
         end: datetime.datetime,
-    ) -> DataFrame[OHLCV]:
+        *,
+        ambiguity_column: str | None = None,
+    ) -> LazyFrame[OHLCV]:
         """Loads local **binance.vision** OHLCV data.
 
         Loads **binance.vision** OHLCV bulk data on left-closed
@@ -61,19 +63,20 @@ class BinanceAdapter:
         config: BinanceDataConfig
         start : datetime.datetime
         end : datetime.datetime
+        ambiguity_column : str, optional
+            Include "ambiguous" column in resulting frame.
+            Default is None, which means no ambiguity column is produced.
 
         Returns
         -------
-        DataFrame[OHLCV]
+        LazyFrame[OHLCV]
             OHLCV time series data.
 
         Notes
         -----
 
-        Returned OHLCV data time series is continuous on the whole requested half-interval.
-        Trade data is not post-processed and may contain `null` sequences.
-
-        Aggregates daily and monthly data if both present.
+        Returned time-series data cannot contain null and NaN values,
+        but may contain time gaps due to missing data.
 
         Warnings
         --------
@@ -96,7 +99,7 @@ class BinanceAdapter:
                 volume=lit(None),
             )
             .join(
-                daily_data.lazy().select(OHLCV.column_names()),
+                daily_data.select(OHLCV.column_names()),
                 how="left",
                 on="date_time",
                 coalesce=False,
@@ -104,7 +107,7 @@ class BinanceAdapter:
                 suffix="_daily",
             )
             .join(
-                monthly_data.lazy().select(OHLCV.column_names()),
+                monthly_data.select(OHLCV.column_names()),
                 how="left",
                 on="date_time",
                 coalesce=False,
@@ -118,31 +121,22 @@ class BinanceAdapter:
                 close=coalesce("close_daily", "close_monthly"),
                 volume=coalesce("volume_daily", "volume_monthly"),
             )
-            .collect()
+            .filter(col(name).is_not_null() for name in OHLCV.column_names())
         )
 
-        ambiguous_entries = filled_data.filter(
-            (col("open_daily").ne_missing(col("open_monthly")))
-            | (col("high_daily").ne_missing(col("high_monthly")))
-            | (col("low_daily").ne_missing(col("low_monthly")))
-            | (col("close_daily").ne_missing(col("close_monthly")))
-            | (col("volume_daily").ne_missing(col("volume_monthly"))),
-            col("date_time_daily").is_not_null(),
-            col("date_time_monthly").is_not_null(),
-        )
-
-        ambiguous_entries_count: int = ambiguous_entries.select(length()).item()
-        if ambiguous_entries_count:
-            self.LOGGER.warning(
-                f"{config.symbol}-{config.interval}: "
-                f"found {ambiguous_entries_count} ambiguous entries\n"
-                f"{ambiguous_entries}"
+        schema = OHLCV.polar_schema()
+        if ambiguity_column is not None:
+            generator = (
+                col(f"{name}_daily").ne_missing(col(f"{name}_monthly"))
+                for name in OHLCV.column_names()
             )
 
-        return DataFrame[OHLCV](
-            filled_data.select(OHLCV.column_names()),
-            OHLCV.column_names(),
-        )
+            schema[ambiguity_column] = Boolean()
+            filled_data = filled_data.with_columns(
+                lit(value=True).or_(*generator).alias(ambiguity_column)
+            )
+
+        return OHLCV.validate(filled_data.select(schema.keys()), lazy=True)
 
     def _load_ohlcv(
         self,
@@ -150,9 +144,9 @@ class BinanceAdapter:
         start: datetime.datetime,
         end: datetime.datetime,
         granularity: BinanceDataGranularity,
-    ) -> DataFrame[BinanceOHLCV]:
-        chunks: list[PolarDataFrame] = []
-        interval_seconds = (end - start).total_seconds()
+    ) -> LazyFrame[BinanceOHLCV]:
+        chunks: list[PolarLazyFrame] = []
+        time_tracker = TimeFraction(start, end)
 
         with Progress(
             console=RichConsoleStack.active_console(), transient=True
@@ -172,22 +166,21 @@ class BinanceAdapter:
 
                 chunk_date_time = granularity.next_chunk(chunk_date_time)
 
-                loaded_seconds = (chunk_date_time - start).total_seconds()
-                completed_percentage = (loaded_seconds / interval_seconds) * 100
+                completed_percentage = time_tracker.fraction(chunk_date_time) * 100
                 progress.update(task, completed=completed_percentage)
 
         if not len(chunks):
-            return DataFrame[BinanceOHLCV]({}, BinanceOHLCV.column_names())
+            return LazyFrame[BinanceOHLCV]({}, BinanceOHLCV.polar_schema())
 
         data = concat(chunks, how="vertical", rechunk=False)
-        return DataFrame[BinanceOHLCV](data, BinanceOHLCV.column_names())
+        return BinanceOHLCV.validate(data, lazy=True)
 
     def _load_ohlcv_file(
         self,
         config: BinanceDataConfig,
         date: datetime.date,
         granularity: BinanceDataGranularity,
-    ) -> DataFrame[BinanceOHLCV] | None:
+    ) -> LazyFrame[BinanceOHLCV] | None:
         path = self._find_file_path(config, date, granularity)
         if path is None:
             return None
@@ -198,19 +191,18 @@ class BinanceAdapter:
             "ignore": Int16,
         }
 
-        raw_data = read_csv(
+        raw_data = scan_csv(
             ZipFile(path).read(path.with_suffix(".csv").name),
             has_header=False,
-            new_columns=BinanceOHLCV.column_names(),
+            new_columns=list(BinanceOHLCV.column_names()),
             schema=raw_schema,
         ).with_columns(
             date_time=self._from_unix(config, "date_time", date),
             close_date_time=self._from_unix(config, "close_date_time", date),
         )
 
-        return DataFrame[BinanceOHLCV](
-            raw_data.select(BinanceOHLCV.column_names()),
-            BinanceOHLCV.column_names(),
+        return BinanceOHLCV.validate(
+            raw_data.select(BinanceOHLCV.column_names()), lazy=True
         )
 
     def _find_file_path(
