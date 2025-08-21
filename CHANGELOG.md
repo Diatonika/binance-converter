@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.5.0 (2025-08-21)
+
+### Chores
+
+- Bump baikal-commons to 0.15 ([#5](https://github.com/Diatonika/baikal-converters/pull/5),
+  [`54be08f`](https://github.com/Diatonika/baikal-converters/commit/54be08fa66b0fa8d27ebe97679d1eafa30384dc8))
+
+
 ## v0.4.0 (2025-07-09)
 
 ### Features
