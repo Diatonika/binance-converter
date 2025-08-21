@@ -3,7 +3,7 @@ from typing import Annotated
 from pandera.typing.polars import Series
 from polars import Datetime, Float64, Int64
 
-from baikal.common.trade.models import TradeModel
+from baikal.common.models import TradeModel
 
 
 class BinanceOHLCV(TradeModel):
