@@ -21,9 +21,9 @@ from polars import (
 )
 from rich.progress import Progress
 
+from baikal.common.models import OHLCV
 from baikal.common.rich import RichConsoleStack, with_handler
 from baikal.common.rich.progress import TimeFraction
-from baikal.common.trade.models import OHLCV
 from baikal.converters.binance._data_granularity import BinanceDataGranularity
 from baikal.converters.binance._ohlcv import BinanceOHLCV
 from baikal.converters.binance.config import BinanceDataConfig
@@ -148,9 +148,7 @@ class BinanceConverter:
         chunks: list[PolarLazyFrame] = []
         time_tracker = TimeFraction(start, end)
 
-        with Progress(
-            console=RichConsoleStack.active_console(), transient=True
-        ) as progress:
+        with Progress(console=RichConsoleStack.active(), transient=True) as progress:
             task = progress.add_task(
                 f"{granularity} {config.symbol}-{config.interval} OHLCV"
             )
