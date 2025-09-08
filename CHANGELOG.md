@@ -1,6 +1,15 @@
 # CHANGELOG
 
 
+## v0.5.2 (2025-09-08)
+
+### Bug Fixes
+
+- **binance**: Force progress redraw on task finish
+  ([#9](https://github.com/Diatonika/baikal-converters/pull/9),
+  [`6ae2c42`](https://github.com/Diatonika/baikal-converters/commit/6ae2c42ee5db8dc8a1a6e2c62bf6062db70d8bd6))
+
+
 ## v0.5.1 (2025-09-08)
 
 ### Bug Fixes
