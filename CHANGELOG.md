@@ -1,6 +1,15 @@
 # CHANGELOG
 
 
+## v0.5.1 (2025-09-08)
+
+### Bug Fixes
+
+- **binance**: Fix unfinished progress after OHLCV loading
+  ([#7](https://github.com/Diatonika/baikal-converters/pull/7),
+  [`2097ece`](https://github.com/Diatonika/baikal-converters/commit/2097ececada845be6a36befbcc39ace896ba2784))
+
+
 ## v0.5.0 (2025-08-21)
 
 ### Chores
