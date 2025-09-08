@@ -167,6 +167,8 @@ class BinanceConverter:
                 completed_percentage = time_tracker.fraction(chunk_date_time) * 100
                 progress.update(task, completed=completed_percentage)
 
+            progress.update(task, completed=100)
+
         if not len(chunks):
             return LazyFrame[BinanceOHLCV]({}, BinanceOHLCV.polar_schema())
 
