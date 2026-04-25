@@ -1,7 +1,10 @@
 from enum import StrEnum
 
+from public import public
 
-class BinanceDataInterval(StrEnum):
+
+@public
+class Interval(StrEnum):
     ONE_SECOND = "1s"
     ONE_MINUTE = "1m"
     THREE_MINUTES = "3m"
@@ -20,13 +23,15 @@ class BinanceDataInterval(StrEnum):
     ONE_MONTH = "1mo"
 
 
-class BinanceDataType(StrEnum):
+@public
+class DataType(StrEnum):
     AGGREGATED_TRADES = "aggTrades"
-    OHLCV = "klines"
+    KLINES = "klines"
     TRADES = "trades"
 
 
-class BinanceInstrumentType(StrEnum):
+@public
+class InstrumentType(StrEnum):
     FUTURES = "futures"
     OPTION = "option"
     SPOT = "spot"
