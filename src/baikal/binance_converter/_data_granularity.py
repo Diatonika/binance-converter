@@ -3,15 +3,17 @@ import datetime
 from enum import StrEnum
 
 from dateutil.relativedelta import relativedelta
+from public import public
 
 
-class BinanceDataGranularity(StrEnum):
+@public
+class DataGranularity(StrEnum):
     DAILY = "daily"
     MONTHLY = "monthly"
 
     def next_chunk(self, date_time: datetime.datetime) -> datetime.datetime:
         match self:
-            case BinanceDataGranularity.DAILY:
+            case DataGranularity.DAILY:
                 next_day = date_time.date() + relativedelta(days=1)
                 return datetime.datetime(
                     next_day.year,
@@ -20,7 +22,7 @@ class BinanceDataGranularity(StrEnum):
                     tzinfo=date_time.tzinfo,
                 )
 
-            case BinanceDataGranularity.MONTHLY:
+            case DataGranularity.MONTHLY:
                 next_month = date_time.date() + relativedelta(months=1)
                 return datetime.datetime(
                     next_month.year,
@@ -34,9 +36,9 @@ class BinanceDataGranularity(StrEnum):
 
     def file_date(self, date: datetime.date) -> str:
         match self:
-            case BinanceDataGranularity.DAILY:
+            case DataGranularity.DAILY:
                 return f"{date.year:02d}-{date.month:02d}-{date.day:02d}"
-            case BinanceDataGranularity.MONTHLY:
+            case DataGranularity.MONTHLY:
                 return f"{date.year:02d}-{date.month:02d}"
 
         error = f"Unsupported data granularity: {self}"
