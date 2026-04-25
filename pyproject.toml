@@ -4,31 +4,30 @@ requires = ["poetry-core"]
 
 [project]
 authors = [{ name = "Valery Ratsko", email = "<zitrasa@yandex.ru>" }]
-description = "Baikal Template Repository"
-name = "baikal-converters"
+description = "Baikal Public Data Converter"
+name = "binance-data-converter"
 version = "0.5.1"
 readme = "README.md"
 requires-python = ">= 3.12, < 4.0"
 
 dependencies = [
+    "atpublic (>= 7.0, < 8.0)",
     "attrs (>= 25.0, < 26.0)",
+    "click (>= 8.0, < 9.0)",
     "dynaconf (>= 3.0, < 4.0)",
-    "baikal-common (>= 0.15, < 1.0)",
     "pandera[pandas, polars] (>= 0.24, < 1.0)",
     "polars (>= 1.0, < 2.0)",
 ]
 
 [tool.poetry]
 exclude = [
-    "src/baikal/*.py"  # Explicitly exclude all python files from baikal namespace package
+    "src/baikal/*.py", # Explicitly exclude all python files from baikal namespace package
 ]
 
 packages = [
-    { include = "baikal", from = "src" }
+    { include = "baikal", from = "src" },
 ]
 
-[tool.poetry.dependencies]
-baikal-common = { source = "baikal-pypi" }
 
 # Semantic Release Settings
 
@@ -76,10 +75,7 @@ pytest-datadir = "^1.0"
 
 [tool.ruff.lint]
 ignore = ["E203", "E501", "E701"]
-select = [
-    "E", "F", "W", "C90", "I", "UP", "ANN2", "ASYNC", "BLE", "FBT", "B", "A", "C4", "DTZ",
-    "EM", "ISC", "PYI", "PT", "RSE", "RET", "SLF", "SIM", "TID", "PTH", "PLE1", "TRY"
-]
+select = ["E", "F", "W", "C90", "I", "UP", "ANN2", "ASYNC", "BLE", "FBT", "B", "A", "C4", "DTZ", "EM", "ISC", "PYI", "PT", "RSE", "RET", "SLF", "SIM", "TID", "PTH", "PLE1", "TRY"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
