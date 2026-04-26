@@ -6,7 +6,7 @@ requires = ["poetry-core"]
 authors = [{ name = "Valery Ratsko", email = "<zitrasa@yandex.ru>" }]
 description = "Baikal Public Data Converter"
 name = "binance-converter"
-version = "0.6.0"
+version = "0.7.0"
 readme = "README.md"
 requires-python = ">= 3.12, < 4.0"
 

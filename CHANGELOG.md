@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.7.0 (2026-04-26)
+
+### Features
+
+- Refactor cli parameters ([#12](https://github.com/Diatonika/binance-converter/pull/12),
+  [`ff7bd01`](https://github.com/Diatonika/binance-converter/commit/ff7bd01c8c225c40dacaafc8ce0f48f3887566f9))
+
+
 ## v0.6.0 (2026-04-25)
 
 ### Features
