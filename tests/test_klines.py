@@ -57,9 +57,9 @@ def test_cli(datadir: Path, tmp_path: Path) -> None:
         save_klines,
         [
             "--instrument-type",
-            "SPOT",
+            "spot",
             "--interval",
-            "ONE_MINUTE",
+            "1m",
             "--instrument",
             "BTCUSDT",
             "--start",

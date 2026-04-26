@@ -11,8 +11,12 @@ from baikal.binance_converter.klines.klines import load_klines
 @command("klines")
 @argument("root", required=True, type=ClickPath(exists=True, file_okay=False))
 @argument("destination", required=True, type=ClickPath(dir_okay=False))
-@option("--instrument-type", required=True, type=Choice(InstrumentType))
-@option("--interval", required=True, type=Choice(Interval))
+@option(
+    "--instrument-type",
+    required=True,
+    type=Choice(member.value for member in InstrumentType),
+)
+@option("--interval", required=True, type=Choice(member.value for member in Interval))
 @option("--instrument", required=True, type=str)
 @option(
     "--start", required=True, type=DateTime(), help="Inverval start, inclusive (UTC)"
@@ -21,16 +25,16 @@ from baikal.binance_converter.klines.klines import load_klines
 def save_klines(
     root: str,
     destination: str,
-    instrument_type: InstrumentType,
-    interval: Interval,
+    instrument_type: str,
+    interval: str,
     instrument: str,
     start: datetime,
     end: datetime,
 ) -> None:
     config = Config(
         data_type=DataType.KLINES,
-        instrument_type=instrument_type,
-        interval=interval,
+        instrument_type=InstrumentType(instrument_type),
+        interval=Interval(interval),
         instrument=instrument,
     )
 
