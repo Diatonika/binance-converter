@@ -13,5 +13,5 @@ from baikal.binance_converter.enums import (
 class Config:
     data_type: DataType
     instrument_type: InstrumentType
-    interval: Interval
     instrument: str
+    interval: Interval | None = None  # KLines data types only

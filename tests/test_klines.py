@@ -14,10 +14,10 @@ def test_aggregation(datadir: Path) -> None:
     lazy = load_klines(
         datadir,
         Config(
-            DataType.KLINES,
-            InstrumentType.SPOT,
-            Interval.ONE_MINUTE,
-            "BTCUSDT",
+            data_type=DataType.KLINES,
+            instrument_type=InstrumentType.SPOT,
+            instrument="BTCUSDT",
+            interval=Interval.ONE_MINUTE,
         ),
         datetime(2020, 1, 30, tzinfo=UTC),
         datetime(2020, 3, 2, tzinfo=UTC),
@@ -34,10 +34,10 @@ def test_microsecond_conversion(datadir: Path) -> None:
     lazy = load_klines(
         datadir,
         Config(
-            DataType.KLINES,
-            InstrumentType.SPOT,
-            Interval.ONE_MINUTE,
-            "BTCUSDT",
+            data_type=DataType.KLINES,
+            instrument_type=InstrumentType.SPOT,
+            instrument="BTCUSDT",
+            interval=Interval.ONE_MINUTE,
         ),
         datetime(2024, 12, 31, tzinfo=UTC),
         datetime(2025, 1, 2, tzinfo=UTC),

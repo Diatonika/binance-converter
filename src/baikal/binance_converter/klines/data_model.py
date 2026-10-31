@@ -1,10 +1,12 @@
-from typing import Annotated, Any
+from typing import Annotated
 
 from pandera.api.polars.model_config import BaseConfig
 from pandera.polars import DataFrameModel
 from pandera.typing.polars import Series
 from polars import Datetime, Float64, Int64, Schema
 from public import public
+
+from baikal.binance_converter._schema import polars_schema
 
 
 @public
@@ -26,11 +28,7 @@ class DataModel(DataFrameModel):
 
     @classmethod
     def polar_schema(cls) -> Schema:
-        types: dict[str, Any] = {
-            name: dtype.type for name, dtype in cls.to_schema().dtypes.items()
-        }
-
-        return Schema(types, check_dtypes=True)
+        return polars_schema(cls)
 
     class Config(BaseConfig):
         coerce = True

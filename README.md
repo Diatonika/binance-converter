@@ -58,3 +58,28 @@ just init-dev
     1. → `Run Ruff on Code Reformat`: `true`.
     2. → `Use Ruff Format`: `true`.
     3. → If not auto-detected, specify paths `.venv/Scripts/ruff.exe` and `pyproject.toml`.
+
+## Usage ##
+
+Download **binance.vision** archive files into a local directory (archive layout kept, checksums verified, present
+files skipped; monthly files are preferred, daily files replace missing months):
+
+```bash
+python -m baikal.binance_converter download data/raw/binance-vision \
+  --instrument-type futures/um --data-type metrics --instrument BTCUSDT --start 2020-09-01 --end 2026-10-01
+```
+
+Convert them into parquet files on [`start`, `end`):
+
+| Command        | Data types                                                                                                | Notes                                                                                                                             |
+|----------------|-----------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| `klines`       | `klines` (spot & futures), futures `premiumIndexKlines`, `indexPriceKlines`, `markPriceKlines` (`--data-type`) | Files with & without header rows                                                                                                  |
+| `metrics`      | USD-M futures `metrics`: open interest, long / short ratios, taker buy / sell volume ratio                 | `date_time` is the 5-minute period start, values are known at `close_date_time` (files before 2024-03-04 stamp the period end) |
+| `funding-rate` | USD-M futures `fundingRate`                                                                               | `date_time` is the settlement time                                                                                                |
+
+```bash
+python -m baikal.binance_converter metrics data/raw/binance-vision metrics.parquet \
+  --instrument-type futures/um --instrument BTCUSDT --start 2020-09-01 --end 2026-10-01
+```
+
+`--instrument-type` values are archive directories: `spot`, `futures/um`, `futures/cm`, `option`.
