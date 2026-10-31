@@ -1,6 +1,32 @@
 # CHANGELOG
 
 
+## v0.8.0 (2026-10-31)
+
+### Features
+
+- Support futures metrics, funding rate & premium index data
+  ([#13](https://github.com/Diatonika/binance-converter/pull/13),
+  [`ec382ef`](https://github.com/Diatonika/binance-converter/commit/ec382efad004d914231a3d2dfb3f2b013f624ce5))
+
+- download command: binance.vision archive files into a local directory with sha256 checksums,
+  monthly files with daily fallback - klines: USD-M & COIN-M futures (`futures/um`, `futures/cm`),
+  premium index, index & mark price KLines, CSV files with & without header rows - metrics command:
+  5-minute futures metrics with the period start as `date_time` (files before 2024-03-04 stamp the
+  period end) and the time the values are known as `close_date_time` - funding-rate command: settled
+  funding rates
+
+BREAKING CHANGE: `InstrumentType.FUTURES` is replaced by `USD_M_FUTURES` (`futures/um`) and
+  `COIN_M_FUTURES` (`futures/cm`); `Config.interval` is optional and comes last.
+
+Co-authored-by: Claude Opus 5.5 <noreply@anthropic.com>
+
+### Breaking Changes
+
+- `instrumenttype.futures` is replaced by `USD_M_FUTURES` (`futures/um`) and `COIN_M_FUTURES`
+  (`futures/cm`); `Config.interval` is optional and comes last.
+
+
 ## v0.7.0 (2026-04-26)
 
 ### Features
