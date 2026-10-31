@@ -2,6 +2,8 @@ from enum import StrEnum
 
 from public import public
 
+from baikal.binance_converter._data_granularity import DataGranularity
+
 
 @public
 class Interval(StrEnum):
@@ -29,9 +31,41 @@ class DataType(StrEnum):
     KLINES = "klines"
     TRADES = "trades"
 
+    # USD-M & COIN-M futures only
+    INDEX_PRICE_KLINES = "indexPriceKlines"
+    MARK_PRICE_KLINES = "markPriceKlines"
+    PREMIUM_INDEX_KLINES = "premiumIndexKlines"
+    METRICS = "metrics"
+    FUNDING_RATE = "fundingRate"
 
+    @property
+    def granularities(self) -> tuple[DataGranularity, ...]:
+        """Granularities the archive publishes the data type files with."""
+
+        match self:
+            case DataType.METRICS:
+                return (DataGranularity.DAILY,)
+            case DataType.FUNDING_RATE:
+                return (DataGranularity.MONTHLY,)
+
+        return DataGranularity.MONTHLY, DataGranularity.DAILY
+
+    @property
+    def is_klines(self) -> bool:
+        """Files share the KLines format, see `load_klines`."""
+
+        return self in {
+            DataType.KLINES,
+            DataType.INDEX_PRICE_KLINES,
+            DataType.MARK_PRICE_KLINES,
+            DataType.PREMIUM_INDEX_KLINES,
+        }
+
+
+# Values are directories of the archive.
 @public
 class InstrumentType(StrEnum):
-    FUTURES = "futures"
-    OPTION = "option"
     SPOT = "spot"
+    USD_M_FUTURES = "futures/um"
+    COIN_M_FUTURES = "futures/cm"
+    OPTION = "option"

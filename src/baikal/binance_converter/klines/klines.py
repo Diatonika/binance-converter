@@ -1,7 +1,6 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO
-from zipfile import ZipFile
 
 from pandera.typing.polars import LazyFrame
 from polars import (
@@ -24,6 +23,7 @@ from public import private, public
 from rich.progress import Progress
 
 from baikal.binance_converter._data_granularity import DataGranularity
+from baikal.binance_converter.archive import file_dates, local_file, read_zip_csv
 from baikal.binance_converter.config import Config
 from baikal.binance_converter.enums import InstrumentType
 from baikal.binance_converter.klines.data_model import DataModel
@@ -43,7 +43,8 @@ def load_klines(
     """Loads local **binance.vision** KLines data.
 
     Loads **binance.vision** KLines bulk data on left-closed
-    interval [`start`, `end`) from local directory.
+    interval [`start`, `end`) from local directory. KLines-like futures
+    data types (premium index, index & mark price) are loaded as well.
 
     Parameters
     ----------
@@ -67,6 +68,10 @@ def load_klines(
     but may contain time gaps due to missing data.
     """
 
+    if not config.data_type.is_klines or config.interval is None:
+        message = f"KLines data type & interval are required, but got {config}."
+        raise ValueError(message)
+
     daily_data = load_klines_with_granularity(
         root, config, start, end, DataGranularity.DAILY
     )
@@ -87,7 +92,7 @@ def load_klines(
             date_time=datetime_range(
                 start,
                 end,
-                config.interval,
+                str(config.interval),
                 closed="left",
                 time_unit="us",
                 time_zone="UTC",
@@ -136,13 +141,16 @@ def load_klines(
 
 @public
 def load_from_zip(path: Path, instrument_type: InstrumentType) -> LazyFrame[DataModel]:
-    with ZipFile(path).open(path.with_suffix(".csv").name) as opened:
-        return load_from_csv(opened.read(), instrument_type)
+    content, has_header = read_zip_csv(path)
+    return load_from_csv(content, instrument_type, has_header=has_header)
 
 
 @public
 def load_from_csv(
-    csv: Path | IO[bytes] | IO[str] | bytes | str, instrument_type: InstrumentType
+    csv: Path | IO[bytes] | IO[str] | bytes | str,
+    instrument_type: InstrumentType,
+    *,
+    has_header: bool = False,
 ) -> LazyFrame[DataModel]:
     raw_schema = {
         "date_time": Int64,
@@ -162,7 +170,7 @@ def load_from_csv(
     raw_data = scan_csv(
         csv,
         has_header=False,
-        new_columns=list(DataModel.to_schema().columns),
+        skip_rows=int(has_header),
         schema=raw_schema,
     ).with_columns(
         date_time=parse_unix(instrument_type, "date_time"),
@@ -189,14 +197,12 @@ def load_klines_with_granularity(
             f"{granularity} {config.instrument}-{config.interval} KLines"
         )
 
-        chunk_date_time = start
-        while chunk_date_time < end:
-            path = build_zip_path(root, config, chunk_date_time.date(), granularity)
+        for file_date in file_dates(granularity, start, end):
+            path = local_file(root, config, granularity, file_date)
             if path is not None:
                 chunk = load_from_zip(path, config.instrument_type)
                 chunks.append(chunk)
 
-            chunk_date_time = granularity.next_chunk(chunk_date_time)
             progress.advance(task)
 
         progress.update(task, completed=100, refresh=True)
@@ -206,26 +212,6 @@ def load_klines_with_granularity(
 
     data = concat(chunks, how="vertical", rechunk=False)
     return DataModel.validate(data, lazy=True)
-
-
-@private
-def build_zip_path(
-    root: Path, config: Config, date: date, granularity: DataGranularity
-) -> Path | None:
-    file_name = (
-        f"{config.instrument}-{config.interval}-{granularity.file_date(date)}.zip"
-    )
-
-    folder = (
-        Path(config.instrument_type)
-        / granularity
-        / config.data_type
-        / config.instrument
-        / config.interval
-    )
-
-    path = root / folder / file_name
-    return path if path.exists() and path.is_file() else None
 
 
 @private

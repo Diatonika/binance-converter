@@ -1,8 +1,14 @@
 from datetime import datetime
 from pathlib import Path
 
-from click import Choice, DateTime, Path as ClickPath, argument, command, option
+from click import Choice, Path as ClickPath, argument, command, option
 
+from baikal.binance_converter.cli import (
+    end_option,
+    instrument_option,
+    instrument_type_option,
+    start_option,
+)
 from baikal.binance_converter.config import Config
 from baikal.binance_converter.enums import DataType, InstrumentType, Interval
 from baikal.binance_converter.klines.klines import load_klines
@@ -11,31 +17,35 @@ from baikal.binance_converter.klines.klines import load_klines
 @command("klines")
 @argument("root", required=True, type=ClickPath(exists=True, file_okay=False))
 @argument("destination", required=True, type=ClickPath(dir_okay=False))
+@instrument_type_option
 @option(
-    "--instrument-type",
-    required=True,
-    type=Choice(member.value for member in InstrumentType),
+    "--data-type",
+    type=Choice(member.value for member in DataType if member.is_klines),
+    default=DataType.KLINES.value,
+    show_default=True,
+    help="KLines-like data type, others than `klines` are futures only.",
 )
 @option("--interval", required=True, type=Choice(member.value for member in Interval))
-@option("--instrument", required=True, type=str)
-@option(
-    "--start", required=True, type=DateTime(), help="Inverval start, inclusive (UTC)"
-)
-@option("--end", required=True, type=DateTime(), help="Interval end, exclusive (UTC)")
+@instrument_option
+@start_option
+@end_option
 def save_klines(
     root: str,
     destination: str,
     instrument_type: str,
+    data_type: str,
     interval: str,
     instrument: str,
     start: datetime,
     end: datetime,
 ) -> None:
+    """Convert KLines archive files within ROOT into DESTINATION parquet file."""
+
     config = Config(
-        data_type=DataType.KLINES,
+        data_type=DataType(data_type),
         instrument_type=InstrumentType(instrument_type),
-        interval=Interval(interval),
         instrument=instrument,
+        interval=Interval(interval),
     )
 
     klines = load_klines(Path(root), config, start, end)
