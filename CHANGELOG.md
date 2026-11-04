@@ -1,6 +1,15 @@
 # CHANGELOG
 
 
+## v0.9.0 (2026-11-04)
+
+### Features
+
+- List archive files, retry dropped downloads, percent-encode non-ASCII paths
+  ([#14](https://github.com/Diatonika/binance-converter/pull/14),
+  [`65eac6d`](https://github.com/Diatonika/binance-converter/commit/65eac6d8fb3960e55ba95e4fedda9ba669a1ea4e))
+
+
 ## v0.8.0 (2026-10-31)
 
 ### Features
