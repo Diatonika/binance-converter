@@ -19,6 +19,20 @@ def archive_file(
     ``futures/um/daily/metrics/BTCUSDT/BTCUSDT-metrics-2020-09-01.zip``.
     """
 
+    # KLines files are named after their interval, other files after their data type.
+    suffix = config.interval if config.interval is not None else config.data_type
+    name = f"{config.instrument}-{suffix}-{granularity.file_date(file_date)}.zip"
+
+    return archive_folder(config, granularity) / name
+
+
+@public
+def archive_folder(config: Config, granularity: DataGranularity) -> PurePosixPath:
+    """Folder of the ``config`` files relative to the archive root, e.g.
+    ``spot/monthly/klines/BTCUSDT/1m``. Instruments may be non-ASCII (e.g. Chinese
+    meme coins): their URLs are percent-encoded by `archive_url`.
+    """
+
     folder = (
         PurePosixPath(config.instrument_type)
         / granularity
@@ -26,15 +40,7 @@ def archive_file(
         / config.instrument
     )
 
-    # KLines files are named after their interval, other files after their data type.
-    suffix: str = config.data_type
-    if config.interval is not None:
-        folder /= config.interval
-        suffix = config.interval
-
-    return (
-        folder / f"{config.instrument}-{suffix}-{granularity.file_date(file_date)}.zip"
-    )
+    return folder / config.interval if config.interval is not None else folder
 
 
 @public

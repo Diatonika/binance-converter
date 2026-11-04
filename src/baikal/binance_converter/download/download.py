@@ -4,8 +4,11 @@ from datetime import date, datetime, time
 from enum import Enum, auto
 from hashlib import sha256
 from http import HTTPStatus
+from http.client import HTTPException
 from pathlib import Path, PurePosixPath
-from urllib.error import HTTPError
+from time import sleep
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import urlopen
 
 from attrs import frozen
@@ -20,6 +23,14 @@ from baikal.binance_converter.config import Config
 ARCHIVE_URL = "https://data.binance.vision/data"
 
 TIMEOUT_SECONDS = 60
+
+# Transient failures (timeouts, dropped connections, throttling & server errors) are
+# retried with exponential backoff: 1, 2, 4, 8 seconds.
+ATTEMPTS = 5
+BACKOFF_SECONDS = 1.0
+RETRIED_STATUSES = frozenset({HTTPStatus.TOO_MANY_REQUESTS}) | frozenset(
+    status for status in HTTPStatus if status >= HTTPStatus.INTERNAL_SERVER_ERROR
+)
 
 
 @public
@@ -100,6 +111,13 @@ def download_archive(
 
 
 @public
+def archive_url(file: PurePosixPath, *, base_url: str = ARCHIVE_URL) -> str:
+    """URL of the archive ``file``, its path percent-encoded (non-ASCII instruments)."""
+
+    return f"{base_url}/{quote(file.as_posix())}"
+
+
+@public
 def download_file(root: Path, file: PurePosixPath, *, base_url: str) -> FileState:
     """Download archive ``file`` into ``root``, verifying its checksum."""
 
@@ -107,7 +125,7 @@ def download_file(root: Path, file: PurePosixPath, *, base_url: str) -> FileStat
     if destination.is_file():
         return FileState.PRESENT
 
-    url = f"{base_url}/{file}"
+    url = archive_url(file, base_url=base_url)
     try:
         content = fetch(url)
     except HTTPError as error:
@@ -135,10 +153,17 @@ def parse_checksum(content: bytes) -> str:
     return content.decode("utf-8").split()[0].lower()
 
 
-@private
+@public
 def download_files(
-    root: Path, files: list[PurePosixPath], *, workers: int, base_url: str
+    root: Path,
+    files: list[PurePosixPath],
+    *,
+    workers: int,
+    base_url: str = ARCHIVE_URL,
 ) -> dict[PurePosixPath, FileState]:
+    """Download archive ``files`` into ``root`` in parallel, e.g. files of a listing
+    (see `list_files`) of many instruments at once."""
+
     with (
         Progress(transient=True) as progress,
         ThreadPoolExecutor(max_workers=workers) as executor,
@@ -173,8 +198,31 @@ def days_of_months(
     return days
 
 
-@private
+@public
 def fetch(url: str) -> bytes:
-    with urlopen(url, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310 - fixed https archive URL
-        content: bytes = response.read()
-        return content
+    """Content of ``url``, retrying transient failures (see `ATTEMPTS`)."""
+
+    for attempt in range(ATTEMPTS):
+        try:
+            with urlopen(url, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310 - fixed https archive URL
+                content: bytes = response.read()
+                return content
+        except (URLError, TimeoutError, ConnectionError, HTTPException) as error:
+            if not is_transient(error) or attempt == ATTEMPTS - 1:
+                raise
+
+            sleep(BACKOFF_SECONDS * 2**attempt)
+
+    message = f"No attempts to fetch {url}."
+    raise AssertionError(message)
+
+
+@private
+def is_transient(error: OSError | HTTPException) -> bool:
+    """Timeouts, dropped connections & truncated responses, throttling & server
+    errors: not missing files."""
+
+    if isinstance(error, HTTPError):
+        return error.code in RETRIED_STATUSES
+
+    return True
