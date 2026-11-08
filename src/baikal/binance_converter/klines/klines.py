@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO
+from typing import IO, cast
 
 from pandera.typing.polars import LazyFrame
 from polars import (
@@ -39,6 +39,7 @@ def load_klines(
     end: datetime,
     *,
     ambiguity_column: str | None = None,
+    progress: bool = False,
 ) -> LazyFrame[DataModel]:
     """Loads local **binance.vision** KLines data.
 
@@ -56,6 +57,8 @@ def load_klines(
     ambiguity_column : str, optional
         Include "ambiguous" indicator column in resulting frame.
         Default is None, which means no ambiguity column is produced.
+    progress : bool
+        Show a progress bar of the files read (e.g. from the command line).
 
     Returns
     -------
@@ -73,11 +76,11 @@ def load_klines(
         raise ValueError(message)
 
     daily_data = load_klines_with_granularity(
-        root, config, start, end, DataGranularity.DAILY
+        root, config, start, end, DataGranularity.DAILY, progress=progress
     )
 
     monthly_data = load_klines_with_granularity(
-        root, config, start, end, DataGranularity.MONTHLY
+        root, config, start, end, DataGranularity.MONTHLY, progress=progress
     )
 
     feature_columns = tuple(
@@ -152,6 +155,20 @@ def load_from_csv(
     *,
     has_header: bool = False,
 ) -> LazyFrame[DataModel]:
+    return DataModel.validate(
+        scan_csv_klines(csv, instrument_type, has_header=has_header), lazy=True
+    )
+
+
+@private
+def scan_csv_klines(
+    csv: Path | IO[bytes] | IO[str] | bytes | str,
+    instrument_type: InstrumentType,
+    *,
+    has_header: bool,
+) -> PolarLazyFrame:
+    """KLines of the CSV, the data model columns, not validated."""
+
     raw_schema = {
         "date_time": Int64,
         "open": Float64,
@@ -177,8 +194,9 @@ def load_from_csv(
         close_date_time=parse_unix(instrument_type, "close_date_time"),
     )
 
-    return DataModel.validate(
-        raw_data.select(DataModel.to_schema().columns.keys()), lazy=True
+    # The validation coerces to the model types: the casts do it here (UTC times)
+    return raw_data.select(DataModel.to_schema().columns.keys()).cast(
+        DataModel.polar_schema()
     )
 
 
@@ -189,29 +207,35 @@ def load_klines_with_granularity(
     start: datetime,
     end: datetime,
     granularity: DataGranularity,
+    *,
+    progress: bool,
 ) -> LazyFrame[DataModel]:
+    # Validated once, as the loaded frame (`load_klines`): a validation per file costs
+    # more than reading it.
     chunks: list[PolarLazyFrame] = []
-
-    with Progress(transient=True) as progress:
-        task = progress.add_task(
+    with Progress(transient=True, disable=not progress) as bar:
+        task = bar.add_task(
             f"{granularity} {config.instrument}-{config.interval} KLines"
         )
-
         for file_date in file_dates(granularity, start, end):
             path = local_file(root, config, granularity, file_date)
             if path is not None:
-                chunk = load_from_zip(path, config.instrument_type)
-                chunks.append(chunk)
+                chunks.append(scan_zip(path, config.instrument_type))
 
-            progress.advance(task)
+            bar.advance(task)
 
-        progress.update(task, completed=100, refresh=True)
-
-    if not len(chunks):
+    if not chunks:
         return LazyFrame[DataModel]({}, DataModel.polar_schema())
 
-    data = concat(chunks, how="vertical", rechunk=False)
-    return DataModel.validate(data, lazy=True)
+    return cast(LazyFrame[DataModel], concat(chunks, how="vertical", rechunk=False))
+
+
+@private
+def scan_zip(path: Path, instrument_type: InstrumentType) -> PolarLazyFrame:
+    """KLines of the archive ``path`` file, not validated."""
+
+    content, has_header = read_zip_csv(path)
+    return scan_csv_klines(content, instrument_type, has_header=has_header)
 
 
 @private

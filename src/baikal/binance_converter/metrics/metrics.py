@@ -49,12 +49,18 @@ MILLISECOND = timedelta(milliseconds=1)
 
 @public
 def load_metrics(
-    root: Path, config: Config, start: datetime, end: datetime
+    root: Path,
+    config: Config,
+    start: datetime,
+    end: datetime,
+    *,
+    progress: bool = False,
 ) -> LazyFrame[MetricsDataModel]:
     """Loads local **binance.vision** futures metrics on [`start`, `end`).
 
     The archive publishes daily files only. Duplicated rows of a period are dropped.
-    Values may be null and periods may be missing.
+    Values may be null and periods may be missing. ``progress`` shows a progress bar
+    of the files read (e.g. from the command line).
     """
 
     if config.data_type != DataType.METRICS:
@@ -62,17 +68,14 @@ def load_metrics(
         raise ValueError(message)
 
     chunks: list[PolarLazyFrame] = []
-    with Progress(transient=True) as progress:
-        task = progress.add_task(f"{config.instrument} metrics")
-
+    with Progress(transient=True, disable=not progress) as bar:
+        task = bar.add_task(f"{config.instrument} metrics")
         for file_date in file_dates(DataGranularity.DAILY, start, end):
             path = local_file(root, config, DataGranularity.DAILY, file_date)
             if path is not None:
                 chunks.append(load_metrics_zip(path))
 
-            progress.advance(task)
-
-        progress.update(task, completed=100, refresh=True)
+            bar.advance(task)
 
     columns = list(MetricsDataModel.to_schema().columns)
     if not chunks:

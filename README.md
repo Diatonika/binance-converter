@@ -83,3 +83,8 @@ python -m baikal.binance_converter metrics data/raw/binance-vision metrics.parqu
 ```
 
 `--instrument-type` values are archive directories: `spot`, `futures/um`, `futures/cm`, `option`.
+
+As a library: `download_archives(root, [ArchivePeriod(config, start, end), ...], workers=8)` downloads the files of
+many instruments in one pool of `workers` files; `load_klines`, `load_metrics` & `load_funding_rate` read the archive
+files of a period straight from their zips into a lazy frame of the command's schema. The progress bars of the
+commands are off by default (`progress=True` shows them).

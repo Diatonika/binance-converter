@@ -37,5 +37,5 @@ def save_metrics(
         instrument=instrument,
     )
 
-    metrics = load_metrics(Path(root), config, start, end)
+    metrics = load_metrics(Path(root), config, start, end, progress=True)
     metrics.collect().write_parquet(destination, mkdir=True)

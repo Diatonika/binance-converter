@@ -48,7 +48,7 @@ def download(
         interval=Interval(interval) if interval is not None else None,
     )
 
-    summary = download_archive(root, config, start, end, workers=workers)
+    summary = download_archive(root, config, start, end, workers=workers, progress=True)
 
     echo(
         f"{config.instrument} {config.data_type}: {summary.downloaded} downloaded, "

@@ -39,5 +39,5 @@ def save_funding_rate(
         instrument=instrument,
     )
 
-    funding_rate = load_funding_rate(Path(root), config, start, end)
+    funding_rate = load_funding_rate(Path(root), config, start, end, progress=True)
     funding_rate.collect().write_parquet(destination, mkdir=True)

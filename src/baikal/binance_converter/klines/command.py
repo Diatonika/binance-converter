@@ -48,5 +48,5 @@ def save_klines(
         interval=Interval(interval),
     )
 
-    klines = load_klines(Path(root), config, start, end)
+    klines = load_klines(Path(root), config, start, end, progress=True)
     klines.collect().write_parquet(destination, mkdir=True)

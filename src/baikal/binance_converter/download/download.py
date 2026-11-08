@@ -1,4 +1,4 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time
 from enum import Enum, auto
@@ -51,6 +51,16 @@ class DownloadSummary:
 
 
 @public
+@frozen
+class ArchivePeriod:
+    """Archive files of ``config`` covering [`start`, `end`)."""
+
+    config: Config
+    start: datetime
+    end: datetime
+
+
+@public
 def download_archive(
     root: Path,
     config: Config,
@@ -59,47 +69,79 @@ def download_archive(
     *,
     workers: int,
     base_url: str = ARCHIVE_URL,
+    progress: bool = False,
 ) -> DownloadSummary:
-    """Download archive files covering [`start`, `end`) into ``root`` directory.
+    """Download archive files covering [`start`, `end`) into ``root`` directory, see
+    `download_archives`."""
+
+    return download_archives(
+        root,
+        [ArchivePeriod(config, start, end)],
+        workers=workers,
+        base_url=base_url,
+        progress=progress,
+    )
+
+
+@public
+def download_archives(
+    root: Path,
+    periods: Sequence[ArchivePeriod],
+    *,
+    workers: int,
+    base_url: str = ARCHIVE_URL,
+    progress: bool = False,
+) -> DownloadSummary:
+    """Download the archive files of many periods (e.g. of many instruments) into
+    ``root`` directory, ``workers`` files at a time over all of them.
 
     Files keep their archive paths, as `load_klines` & other loaders expect. Monthly
     files are preferred, daily files replace monthly ones the archive lacks (e.g. of
-    the current month). Local files are kept as is.
+    the current month). Local files are kept as is. ``progress`` shows a progress bar
+    (e.g. from the command line).
     """
 
-    granularities = config.data_type.granularities
+    # Monthly files of every period first, {file: (period index, month)}
+    months = {
+        archive_file(period.config, DataGranularity.MONTHLY, month): (index, month)
+        for index, period in enumerate(periods)
+        if DataGranularity.MONTHLY in period.config.data_type.granularities
+        for month in file_dates(DataGranularity.MONTHLY, period.start, period.end)
+    }
+    states = download_files(
+        root, list(months), workers=workers, base_url=base_url, progress=progress
+    )
 
-    states: dict[PurePosixPath, FileState] = {}
-    days: list[date] = []
-
-    if DataGranularity.MONTHLY in granularities:
-        months = {
-            archive_file(config, DataGranularity.MONTHLY, month): month
-            for month in file_dates(DataGranularity.MONTHLY, start, end)
-        }
-
-        states = download_files(root, list(months), workers=workers, base_url=base_url)
-
-        if DataGranularity.DAILY in granularities:
+    daily: list[PurePosixPath] = []
+    for index, period in enumerate(periods):
+        granularities = period.config.data_type.granularities
+        if DataGranularity.MONTHLY not in granularities:
+            days = list(file_dates(DataGranularity.DAILY, period.start, period.end))
+        elif DataGranularity.DAILY in granularities:
             # Daily files replace monthly ones the archive lacks, e.g. of the current month.
             missing_months = [
-                months[file]
-                for file, state in states.items()
-                if state is FileState.MISSING
+                month
+                for file, (owner, month) in months.items()
+                if owner == index and states[file] is FileState.MISSING
             ]
+            days = days_of_months(missing_months, period.start, period.end)
+        else:
+            days = []
 
-            states = {
-                file: state
-                for file, state in states.items()
-                if state is not FileState.MISSING
-            }
+        daily += [
+            archive_file(period.config, DataGranularity.DAILY, day) for day in days
+        ]
 
-            days = days_of_months(missing_months, start, end)
-    else:
-        days = list(file_dates(DataGranularity.DAILY, start, end))
-
-    daily = [archive_file(config, DataGranularity.DAILY, day) for day in days]
-    states |= download_files(root, daily, workers=workers, base_url=base_url)
+    replaced = {
+        file
+        for file, (index, _) in months.items()
+        if states[file] is FileState.MISSING
+        and DataGranularity.DAILY in periods[index].config.data_type.granularities
+    }
+    states = {file: state for file, state in states.items() if file not in replaced}
+    states |= download_files(
+        root, daily, workers=workers, base_url=base_url, progress=progress
+    )
 
     return DownloadSummary(
         present=sum(state is FileState.PRESENT for state in states.values()),
@@ -160,19 +202,20 @@ def download_files(
     *,
     workers: int,
     base_url: str = ARCHIVE_URL,
+    progress: bool = False,
 ) -> dict[PurePosixPath, FileState]:
     """Download archive ``files`` into ``root`` in parallel, e.g. files of a listing
-    (see `list_files`) of many instruments at once."""
+    (see `list_files`) of many instruments at once; ``progress`` shows a progress bar."""
 
     with (
-        Progress(transient=True) as progress,
+        Progress(transient=True, disable=not progress) as bar,
         ThreadPoolExecutor(max_workers=workers) as executor,
     ):
-        task = progress.add_task("Download", total=len(files))
+        task = bar.add_task("Download", total=len(files))
 
         def download(file: PurePosixPath) -> tuple[PurePosixPath, FileState]:
             state = download_file(root, file, base_url=base_url)
-            progress.advance(task)
+            bar.advance(task)
             return file, state
 
         return dict(executor.map(download, files))

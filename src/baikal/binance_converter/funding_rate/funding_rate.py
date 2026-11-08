@@ -35,11 +35,17 @@ RAW_SCHEMA = {
 
 @public
 def load_funding_rate(
-    root: Path, config: Config, start: datetime, end: datetime
+    root: Path,
+    config: Config,
+    start: datetime,
+    end: datetime,
+    *,
+    progress: bool = False,
 ) -> LazyFrame[FundingRateDataModel]:
     """Loads local **binance.vision** futures funding rates settled on [`start`, `end`).
 
-    The archive publishes monthly files only.
+    The archive publishes monthly files only. ``progress`` shows a progress bar of the
+    files read (e.g. from the command line).
     """
 
     if config.data_type != DataType.FUNDING_RATE:
@@ -47,17 +53,14 @@ def load_funding_rate(
         raise ValueError(message)
 
     chunks: list[PolarLazyFrame] = []
-    with Progress(transient=True) as progress:
-        task = progress.add_task(f"{config.instrument} funding rate")
-
+    with Progress(transient=True, disable=not progress) as bar:
+        task = bar.add_task(f"{config.instrument} funding rate")
         for file_date in file_dates(DataGranularity.MONTHLY, start, end):
             path = local_file(root, config, DataGranularity.MONTHLY, file_date)
             if path is not None:
                 chunks.append(load_funding_rate_zip(path))
 
-            progress.advance(task)
-
-        progress.update(task, completed=100, refresh=True)
+            bar.advance(task)
 
     columns = list(FundingRateDataModel.to_schema().columns)
     if not chunks:
