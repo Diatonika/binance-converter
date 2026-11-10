@@ -6,8 +6,10 @@ prefixes (folders) per page, continued from the last key of the previous page.
 
 import re
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
+from itertools import groupby
 from pathlib import PurePosixPath
 from urllib.parse import urlencode
 from xml.etree.ElementTree import Element, fromstring
@@ -18,7 +20,7 @@ from public import private, public
 from baikal.binance_converter._data_granularity import DataGranularity
 from baikal.binance_converter.archive import archive_folder
 from baikal.binance_converter.config import Config
-from baikal.binance_converter.download.download import fetch
+from baikal.binance_converter.download.fetch import fetch
 from baikal.binance_converter.enums import DataType, InstrumentType
 
 BUCKET_URL = "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision"
@@ -104,13 +106,65 @@ def list_files(
 
 
 @public
-def list_pages(
-    prefix: str, *, delimiter: bool, bucket_url: str = BUCKET_URL
-) -> Iterator[ListingPage]:
-    """Pages of the bucket keys under ``prefix``: folders below it with the
-    ``delimiter``, all files otherwise."""
+def published_files(
+    files: Sequence[PurePosixPath], *, workers: int, bucket_url: str = BUCKET_URL
+) -> set[PurePosixPath]:
+    """The archive files of ``files`` the archive publishes. The files of a folder with
+    many of them are listed, ``workers`` folders at a time: a listing page covers 1000
+    keys (500 files & their checksums) where a request covers one file. A file alone in
+    its folder is taken as published: requesting it tells as much as listing it."""
 
-    marker = ""
+    by_folder = [
+        sorted(folder_files)
+        for _, folder_files in groupby(
+            sorted(files, key=lambda file: file.parent), key=lambda file: file.parent
+        )
+    ]
+    single = {folder[0] for folder in by_folder if len(folder) == 1}
+    many = [folder for folder in by_folder if len(folder) > 1]
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        listed = executor.map(
+            lambda folder: listed_files(folder[0], folder[-1], bucket_url=bucket_url),
+            many,
+        )
+        return single | {
+            file
+            for folder, published in zip(many, listed, strict=True)
+            for file in folder
+            if file in published
+        }
+
+
+@public
+def listed_files(
+    first: PurePosixPath, last: PurePosixPath, *, bucket_url: str = BUCKET_URL
+) -> set[PurePosixPath]:
+    """Published files of the folder of ``first`` from ``first`` to ``last`` (in key
+    order, as their dates)."""
+
+    folder = f"{DATA_PREFIX}{first.parent}/"
+    last_key = f"{DATA_PREFIX}{last}"
+    # The listing starts after its marker: a key right before the one of `first`.
+    marker = f"{DATA_PREFIX}{first}"[:-1]
+
+    listed: set[PurePosixPath] = set()
+    for page in list_pages(
+        folder, delimiter=False, bucket_url=bucket_url, marker=marker
+    ):
+        listed.update(file.path for file in page.files)
+        if page.next_marker is None or page.next_marker >= last_key:
+            break
+
+    return listed
+
+
+@public
+def list_pages(
+    prefix: str, *, delimiter: bool, bucket_url: str = BUCKET_URL, marker: str = ""
+) -> Iterator[ListingPage]:
+    """Pages of the bucket keys under ``prefix`` after the ``marker`` key: folders below
+    it with the ``delimiter``, all files otherwise."""
+
     while True:
         query = {"prefix": prefix, "marker": marker} | (
             {"delimiter": "/"} if delimiter else {}

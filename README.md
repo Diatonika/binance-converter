@@ -62,7 +62,9 @@ just init-dev
 ## Usage ##
 
 Download **binance.vision** archive files into a local directory (archive layout kept, checksums verified, present
-files skipped; monthly files are preferred, daily files replace missing months):
+files skipped). Monthly files are preferred; daily files replace missing months and fill the days a downloaded monthly
+KLines file has no rows of (the archive misses days in some, e.g. 2022-04-01 & 02). A folder missing several files is
+listed first: only the published files are requested.
 
 ```bash
 python -m baikal.binance_converter download data/raw/binance-vision \
@@ -85,6 +87,8 @@ python -m baikal.binance_converter metrics data/raw/binance-vision metrics.parqu
 `--instrument-type` values are archive directories: `spot`, `futures/um`, `futures/cm`, `option`.
 
 As a library: `download_archives(root, [ArchivePeriod(config, start, end), ...], workers=8)` downloads the files of
-many instruments in one pool of `workers` files; `load_klines`, `load_metrics` & `load_funding_rate` read the archive
+many instruments in one pool of `workers` files; its summary lists the files the archive does not publish, which a
+later call takes as `known_missing` (not asked for again: the caller knows which of them may still be published);
+`load_klines`, `load_metrics` & `load_funding_rate` read the archive
 files of a period straight from their zips into a lazy frame of the command's schema. The progress bars of the
 commands are off by default (`progress=True` shows them).
