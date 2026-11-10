@@ -10,7 +10,8 @@ from baikal.binance_converter._data_granularity import DataGranularity
 from baikal.binance_converter.archive import archive_file
 from baikal.binance_converter.config import Config
 from baikal.binance_converter.download import listing
-from baikal.binance_converter.download.download import archive_url, is_transient
+from baikal.binance_converter.download.download import archive_url
+from baikal.binance_converter.download.fetch import is_transient
 from baikal.binance_converter.download.listing import (
     ArchiveFile,
     parse_file_date,

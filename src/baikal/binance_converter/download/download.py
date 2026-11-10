@@ -1,15 +1,12 @@
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time
 from enum import Enum, auto
 from hashlib import sha256
 from http import HTTPStatus
-from http.client import HTTPException
 from pathlib import Path, PurePosixPath
-from time import sleep
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError
 from urllib.parse import quote
-from urllib.request import urlopen
 
 from attrs import frozen
 from dateutil.relativedelta import relativedelta
@@ -19,18 +16,11 @@ from rich.progress import Progress
 from baikal.binance_converter._data_granularity import DataGranularity
 from baikal.binance_converter.archive import archive_file, file_dates
 from baikal.binance_converter.config import Config
+from baikal.binance_converter.download.fetch import fetch
+from baikal.binance_converter.download.listing import BUCKET_URL, published_files
+from baikal.binance_converter.klines.klines import load_from_zip
 
 ARCHIVE_URL = "https://data.binance.vision/data"
-
-TIMEOUT_SECONDS = 60
-
-# Transient failures (timeouts, dropped connections, throttling & server errors) are
-# retried with exponential backoff: 1, 2, 4, 8 seconds.
-ATTEMPTS = 5
-BACKOFF_SECONDS = 1.0
-RETRIED_STATUSES = frozenset({HTTPStatus.TOO_MANY_REQUESTS}) | frozenset(
-    status for status in HTTPStatus if status >= HTTPStatus.INTERNAL_SERVER_ERROR
-)
 
 
 @public
@@ -47,7 +37,8 @@ class FileState(Enum):
 class DownloadSummary:
     present: int  # Found locally, not downloaded
     downloaded: int
-    missing: list[PurePosixPath]  # Not published by the archive
+    # Not published by the archive (with the monthly files the daily ones replace)
+    missing: list[PurePosixPath]
 
 
 @public
@@ -69,6 +60,8 @@ def download_archive(
     *,
     workers: int,
     base_url: str = ARCHIVE_URL,
+    bucket_url: str = BUCKET_URL,
+    known_missing: Collection[PurePosixPath] = (),
     progress: bool = False,
 ) -> DownloadSummary:
     """Download archive files covering [`start`, `end`) into ``root`` directory, see
@@ -79,6 +72,8 @@ def download_archive(
         [ArchivePeriod(config, start, end)],
         workers=workers,
         base_url=base_url,
+        bucket_url=bucket_url,
+        known_missing=known_missing,
         progress=progress,
     )
 
@@ -90,14 +85,20 @@ def download_archives(
     *,
     workers: int,
     base_url: str = ARCHIVE_URL,
+    bucket_url: str = BUCKET_URL,
+    known_missing: Collection[PurePosixPath] = (),
     progress: bool = False,
 ) -> DownloadSummary:
     """Download the archive files of many periods (e.g. of many instruments) into
     ``root`` directory, ``workers`` files at a time over all of them.
 
     Files keep their archive paths, as `load_klines` & other loaders expect. Monthly
-    files are preferred, daily files replace monthly ones the archive lacks (e.g. of
-    the current month). Local files are kept as is. ``progress`` shows a progress bar
+    files are preferred. Daily files replace the monthly ones the archive lacks (e.g. of
+    the current month) and fill the days a monthly KLines file has no rows of (the
+    archive misses days in some of them, e.g. 2022-04-01 & 02): those of the monthly
+    files downloaded now, local files are kept as is. ``known_missing``: files an earlier
+    call found missing (see `DownloadSummary.missing`), not asked for again; the caller
+    knows which of them the archive may still publish. ``progress`` shows a progress bar
     (e.g. from the command line).
     """
 
@@ -109,7 +110,13 @@ def download_archives(
         for month in file_dates(DataGranularity.MONTHLY, period.start, period.end)
     }
     states = download_files(
-        root, list(months), workers=workers, base_url=base_url, progress=progress
+        root,
+        list(months),
+        workers=workers,
+        base_url=base_url,
+        bucket_url=bucket_url,
+        known_missing=known_missing,
+        progress=progress,
     )
 
     daily: list[PurePosixPath] = []
@@ -118,13 +125,22 @@ def download_archives(
         if DataGranularity.MONTHLY not in granularities:
             days = list(file_dates(DataGranularity.DAILY, period.start, period.end))
         elif DataGranularity.DAILY in granularities:
-            # Daily files replace monthly ones the archive lacks, e.g. of the current month.
-            missing_months = [
-                month
+            own = [
+                (file, month)
                 for file, (owner, month) in months.items()
-                if owner == index and states[file] is FileState.MISSING
+                if owner == index
+            ]
+            missing_months = [
+                month for file, month in own if states[file] is FileState.MISSING
             ]
             days = days_of_months(missing_months, period.start, period.end)
+            if period.config.data_type.is_klines:
+                days += [
+                    day
+                    for file, month in own
+                    if states[file] is FileState.DOWNLOADED
+                    for day in days_without_klines(root / file, period, month)
+                ]
         else:
             days = []
 
@@ -132,15 +148,14 @@ def download_archives(
             archive_file(period.config, DataGranularity.DAILY, day) for day in days
         ]
 
-    replaced = {
-        file
-        for file, (index, _) in months.items()
-        if states[file] is FileState.MISSING
-        and DataGranularity.DAILY in periods[index].config.data_type.granularities
-    }
-    states = {file: state for file, state in states.items() if file not in replaced}
     states |= download_files(
-        root, daily, workers=workers, base_url=base_url, progress=progress
+        root,
+        daily,
+        workers=workers,
+        base_url=base_url,
+        bucket_url=bucket_url,
+        known_missing=known_missing,
+        progress=progress,
     )
 
     return DownloadSummary(
@@ -202,23 +217,56 @@ def download_files(
     *,
     workers: int,
     base_url: str = ARCHIVE_URL,
+    bucket_url: str = BUCKET_URL,
+    known_missing: Collection[PurePosixPath] = (),
     progress: bool = False,
 ) -> dict[PurePosixPath, FileState]:
     """Download archive ``files`` into ``root`` in parallel, e.g. files of a listing
-    (see `list_files`) of many instruments at once; ``progress`` shows a progress bar."""
+    (see `list_files`) of many instruments at once; ``progress`` shows a progress bar.
+
+    Only the files the archive publishes are requested (see `published_files`): a
+    folder missing many files locally is listed first. ``known_missing`` files are
+    missing without a request."""
+
+    missing = set(known_missing)
+    states = {file: FileState.PRESENT for file in files if (root / file).is_file()}
+    states |= {
+        file: FileState.MISSING
+        for file in files
+        if file not in states and file in missing
+    }
+    absent = [file for file in files if file not in states]
+    published = published_files(absent, workers=workers, bucket_url=bucket_url)
+    states |= {file: FileState.MISSING for file in absent if file not in published}
+    requested = [file for file in absent if file in published]
 
     with (
         Progress(transient=True, disable=not progress) as bar,
         ThreadPoolExecutor(max_workers=workers) as executor,
     ):
-        task = bar.add_task("Download", total=len(files))
+        task = bar.add_task("Download", total=len(requested))
 
         def download(file: PurePosixPath) -> tuple[PurePosixPath, FileState]:
             state = download_file(root, file, base_url=base_url)
             bar.advance(task)
             return file, state
 
-        return dict(executor.map(download, files))
+        states |= dict(executor.map(download, requested))
+
+    return states
+
+
+@private
+def days_without_klines(path: Path, period: ArchivePeriod, month: date) -> list[date]:
+    """Days of the period within ``month`` the monthly KLines file has no rows of."""
+
+    klines = load_from_zip(path, period.config.instrument_type).collect()
+    present = set(klines["date_time"].dt.date().to_list())
+    return [
+        day
+        for day in days_of_months([month], period.start, period.end)
+        if day not in present
+    ]
 
 
 @private
@@ -239,33 +287,3 @@ def days_of_months(
         )
 
     return days
-
-
-@public
-def fetch(url: str) -> bytes:
-    """Content of ``url``, retrying transient failures (see `ATTEMPTS`)."""
-
-    for attempt in range(ATTEMPTS):
-        try:
-            with urlopen(url, timeout=TIMEOUT_SECONDS) as response:  # noqa: S310 - fixed https archive URL
-                content: bytes = response.read()
-                return content
-        except (URLError, TimeoutError, ConnectionError, HTTPException) as error:
-            if not is_transient(error) or attempt == ATTEMPTS - 1:
-                raise
-
-            sleep(BACKOFF_SECONDS * 2**attempt)
-
-    message = f"No attempts to fetch {url}."
-    raise AssertionError(message)
-
-
-@private
-def is_transient(error: OSError | HTTPException) -> bool:
-    """Timeouts, dropped connections & truncated responses, throttling & server
-    errors: not missing files."""
-
-    if isinstance(error, HTTPError):
-        return error.code in RETRIED_STATUSES
-
-    return True
