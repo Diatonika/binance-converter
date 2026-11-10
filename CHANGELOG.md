@@ -1,6 +1,15 @@
 # CHANGELOG
 
 
+## v0.9.1 (2026-11-10)
+
+### Bug Fixes
+
+- Optimize downloads by preliminary S3 listing
+  ([#15](https://github.com/Diatonika/binance-converter/pull/15),
+  [`c374904`](https://github.com/Diatonika/binance-converter/commit/c374904cb4c1799c4d532b96469c71e7b888a240))
+
+
 ## v0.9.0 (2026-11-04)
 
 ### Features
